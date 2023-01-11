@@ -112,6 +112,7 @@ func (c *CConverter) CWriteFields(s *strings.Builder, fields []*ast.Field, depth
 
 		var name string
 		var cType string
+		var cTypeSuffix string
 		// var validator Validator
 		// usingValidator := false
 		if f.Tag != nil {
@@ -123,7 +124,13 @@ func (c *CConverter) CWriteFields(s *strings.Builder, fields []*ast.Field, depth
 			// get ctype tag
 			cTypeTag, err := tags.Get("ctype")
 			if err == nil {
-				cType = cTypeTag.Name
+				idx := strings.Index(cTypeTag.Name, "[")
+				if idx > 0 {
+					cType = cTypeTag.Name[0:idx]
+					cTypeSuffix = cTypeTag.Name[idx:]
+				} else {
+					cType = cTypeTag.Name
+				}
 			}
 
 			jsonTag, err := tags.Get("json")
@@ -179,6 +186,10 @@ func (c *CConverter) CWriteFields(s *strings.Builder, fields []*ast.Field, depth
 			s.WriteByte('\'')
 		}
 		s.WriteString(name)
+
+		if cTypeSuffix != "" {
+			s.WriteString(cTypeSuffix)
+		}
 		if quoted {
 			s.WriteByte('\'')
 		}
