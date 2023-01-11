@@ -13,23 +13,15 @@ import (
 	"github.com/steeringwaves/go-struct-convert/converter"
 )
 
+var inputFile string = ""
 var dirname string = ""
 var prefix string = ""
 var suffix string = ""
-var outputFilename string = ""
+var name string = ""
+var tsNamespace string = ""
 var useStdout bool = true
 
-func doConversion(args []string, c converter.Converter) {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "no files specified")
-		os.Exit(1)
-	}
-
-	if len(args) > 1 {
-		fmt.Fprintln(os.Stderr, "too many files specified")
-		os.Exit(1)
-	}
-
+func doConversion(input string, output string, c converter.Converter) {
 	if dirname != "" {
 		useStdout = false
 		dirname = path.Clean(dirname)
@@ -49,30 +41,20 @@ func doConversion(args []string, c converter.Converter) {
 		}
 	}
 
-	for _, filename := range args {
-		builder, err := converter.ConvertFile(filename, c)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
+	builder, err := converter.ConvertFile(input, c)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
-		if useStdout {
-			fmt.Println(builder.String())
-			continue
-		}
+	if useStdout {
+		fmt.Println(builder.String())
+	}
 
-		out := outputFilename
-		if out == "" {
-			out = strings.TrimSuffix(path.Base(filename), path.Ext(filename))
-		} else {
-			out = strings.TrimSuffix(path.Base(out), path.Ext(out))
-		}
-
-		err = ioutil.WriteFile(path.Join(dirname, fmt.Sprintf("%s.%s", out, c.FileExtension())), []byte(builder.String()), 0644)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
+	err = ioutil.WriteFile(path.Join(dirname, fmt.Sprintf("%s.%s", output, c.FileExtension())), []byte(builder.String()), 0644)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
 
@@ -81,9 +63,31 @@ var typescriptCmd = &cobra.Command{
 	Short: "Converts go structs to typescript",
 	Long:  `This command converts go structs to typescript`,
 	Run: func(cmd *cobra.Command, args []string) {
-		doConversion(args, &converter.TypescriptConverter{
-			Prefix: prefix,
-			Suffix: suffix,
+		if inputFile == "" {
+			if len(args) == 0 {
+				fmt.Fprintln(os.Stderr, "no files specified")
+				os.Exit(1)
+			}
+
+			if len(args) > 1 {
+				fmt.Fprintln(os.Stderr, "too many files specified")
+				os.Exit(1)
+			}
+
+			inputFile = args[0]
+		}
+
+		outputFilename := name
+		if outputFilename == "" {
+			outputFilename = strings.TrimSuffix(path.Base(inputFile), path.Ext(inputFile))
+		} else {
+			outputFilename = strings.TrimSuffix(path.Base(outputFilename), path.Ext(outputFilename))
+		}
+
+		doConversion(inputFile, outputFilename, &converter.TypescriptConverter{
+			Prefix:    prefix,
+			Suffix:    suffix,
+			Namespace: tsNamespace,
 		})
 	},
 }
@@ -93,7 +97,28 @@ var cCmd = &cobra.Command{
 	Short: "Converts go structs to c",
 	Long:  `This command converts go structs to c`,
 	Run: func(cmd *cobra.Command, args []string) {
-		doConversion(args, &converter.CConverter{
+		if inputFile == "" {
+			if len(args) == 0 {
+				fmt.Fprintln(os.Stderr, "no files specified")
+				os.Exit(1)
+			}
+
+			if len(args) > 1 {
+				fmt.Fprintln(os.Stderr, "too many files specified")
+				os.Exit(1)
+			}
+
+			inputFile = args[0]
+		}
+
+		outputFilename := name
+		if outputFilename == "" {
+			outputFilename = strings.TrimSuffix(path.Base(inputFile), path.Ext(inputFile))
+		} else {
+			outputFilename = strings.TrimSuffix(path.Base(outputFilename), path.Ext(outputFilename))
+		}
+
+		doConversion(inputFile, outputFilename, &converter.CConverter{
 			Prefix: prefix,
 			Suffix: suffix,
 		})
@@ -103,10 +128,13 @@ var cCmd = &cobra.Command{
 func main() {
 	var rootCmd = &cobra.Command{Use: os.Args[0]}
 
+	rootCmd.PersistentFlags().StringVarP(&inputFile, "input", "i", "", "the input file to parse")
 	rootCmd.PersistentFlags().StringVarP(&dirname, "output", "o", "", "the output directory to save to instead of stdout")
-	rootCmd.PersistentFlags().StringVarP(&outputFilename, "name", "n", "", "the name for the output file (extension is added automatically)")
+	rootCmd.PersistentFlags().StringVarP(&name, "name", "n", "", "the name for the output file (extension is added automatically)")
 	rootCmd.PersistentFlags().StringVarP(&prefix, "prefix", "", "", "the prefix for each struct name to add")
 	rootCmd.PersistentFlags().StringVarP(&suffix, "suffix", "", "", "the suffix for each struct name to add")
+
+	typescriptCmd.Flags().StringVarP(&tsNamespace, "namespace", "", "", "the namespace for each struct name to add (default will be whatever name is)")
 
 	rootCmd.AddCommand(typescriptCmd)
 	rootCmd.AddCommand(cCmd)

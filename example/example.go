@@ -4,16 +4,22 @@ import (
 	"time"
 )
 
+// #c.include <SystemConfig.h>
+// #c.include <stdint.h>
+// ts.import import MathLib from "Math/MathLib";
+
 type Alias struct {
 	Name string `ctype:"char[255]" validate:"presence,min=2,max=32"`
 }
 
-type User struct {
+// some random comment
+
+type User struct { // here we
 	Id      int     `validate:"-"`
 	Name    string  `ctype:"char[255]" validate:"presence,min=2,max=32"`
 	Email   string  `ctype:"char[255]" validate:"email,required"`
 	Value   float64 `validate:"presence,min=0"`
-	Self    *Alias
+	Self    *Alias  // this just points back to ourself
 	Aliases []Alias
 
 	Time_of_day time.Time
@@ -21,7 +27,7 @@ type User struct {
 	ByteBuffer []byte
 	Int8Buffer []int8
 	Unknown    interface{}
-}
+} // another value
 
 type OrderStatus struct {
 	OrderStatusID int    `json:"orderStatusID"`

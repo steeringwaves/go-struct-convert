@@ -12,9 +12,12 @@ import (
 )
 
 type TypescriptConverter struct {
+	Namespace   string
 	Prefix      string
 	Suffix      string
 	MappedTypes map[string]string
+
+	Imports []string
 }
 
 var TypescriptIndent = "    "
@@ -121,6 +124,11 @@ func (ts *TypescriptConverter) TypescriptWriteFields(s *strings.Builder, fields 
 			continue
 		}
 
+		comment := f.Comment.Text()
+		if comment != "" {
+			// TODO parse special comments
+		}
+
 		var name string
 		if f.Tag != nil {
 			tags, err := structtag.Parse(f.Tag.Value[1 : len(f.Tag.Value)-1])
@@ -174,7 +182,13 @@ func (ts *TypescriptConverter) TypescriptWriteFields(s *strings.Builder, fields 
 			return err
 		}
 
-		s.WriteString(";\n")
+		s.WriteString(";")
+
+		if comment != "" {
+			s.WriteString(fmt.Sprintf("	// %s", comment))
+		}
+
+		s.WriteString("\n")
 	}
 
 	return nil
@@ -184,36 +198,73 @@ func (ts *TypescriptConverter) FileExtension() string {
 	return "ts"
 }
 
+var tsImportTag string = "ts.import"
+
+func (ts *TypescriptConverter) HandleFileComments(comments []*ast.CommentGroup) error {
+	for _, comment := range comments {
+		lines := strings.Split(comment.Text(), "\n")
+		for _, line := range lines {
+			idx := strings.LastIndex(line, tsImportTag)
+			if idx >= 0 {
+				imports := strings.TrimSpace(line[idx+len(tsImportTag):])
+				ts.Imports = append(ts.Imports, imports)
+			}
+		}
+	}
+
+	return nil
+}
+
 func (ts *TypescriptConverter) Convert(w *strings.Builder, f ast.Node) error {
 	var err error
 	name := "MyInterface"
 
 	ts.MappedTypes = make(map[string]string)
 
+	builder := new(strings.Builder)
+
 	first := true
 
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
+		case *ast.File:
+			err = ts.HandleFileComments(x.Comments)
 		case *ast.Ident:
 			name = x.Name
 		case *ast.StructType:
 			if !first {
-				w.WriteString("\n\n")
+				builder.WriteString("\n\n")
 			}
 
-			w.WriteString("declare interface ")
+			depth := 0
+			if ts.Namespace != "" {
+				depth++
+			}
+
+			for i := 0; i < depth; i++ {
+				builder.WriteString(TypescriptIndent)
+			}
+
+			if ts.Namespace != "" {
+				builder.WriteString("export interface ")
+			} else {
+				builder.WriteString("declare interface ")
+			}
 
 			newName := ts.Prefix + name + ts.Suffix
 			ts.MappedTypes[name] = newName
-			w.WriteString(newName)
-			w.WriteString(" {\n")
+			builder.WriteString(newName)
+			builder.WriteString(" {\n")
 
-			err = ts.TypescriptWriteFields(w, x.Fields.List, 0)
+			err = ts.TypescriptWriteFields(builder, x.Fields.List, depth)
 			if err != nil {
 				return false
 			}
 
-			w.WriteByte('}')
+			for i := 0; i < depth; i++ {
+				builder.WriteString(TypescriptIndent)
+			}
+			builder.WriteByte('}')
 
 			first = false
 
@@ -222,6 +273,27 @@ func (ts *TypescriptConverter) Convert(w *strings.Builder, f ast.Node) error {
 		}
 		return true
 	})
+
+	for _, imports := range ts.Imports {
+		w.WriteString(fmt.Sprintf("%s\n", imports))
+	}
+
+	if ts.Namespace != "" {
+		w.WriteString(fmt.Sprintf("namespace %s {\n", ts.Namespace))
+	}
+
+	if len(ts.Imports) > 0 {
+		w.WriteString("\n")
+	}
+
+	w.WriteString(builder.String())
+
+	if ts.Namespace != "" {
+		w.WriteString("\n}\n")
+		w.WriteString(fmt.Sprintf("export default %s;\n", ts.Namespace))
+	} else {
+		w.WriteString("\n")
+	}
 
 	return nil
 }

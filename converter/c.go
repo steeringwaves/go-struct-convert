@@ -15,6 +15,8 @@ type CConverter struct {
 	Prefix      string
 	Suffix      string
 	MappedTypes map[string]string
+
+	Includes []string
 }
 
 var CIndent = "    "
@@ -110,6 +112,11 @@ func (c *CConverter) CWriteFields(s *strings.Builder, fields []*ast.Field, depth
 			continue
 		}
 
+		comment := f.Comment.Text()
+		if comment != "" {
+			// TODO parse special comments
+		}
+
 		var name string
 		var cType string
 		var cTypeSuffix string
@@ -143,7 +150,7 @@ func (c *CConverter) CWriteFields(s *strings.Builder, fields []*ast.Field, depth
 				// optional = jsonTag.HasOption("omitempty")
 			}
 
-			// get ctype tag
+			// get validator tag
 			// validatorTag, err := tags.Get("validator")
 			// if err == nil {
 			// 	usingValidator, validator = getValidatorFromTag(validatorTag.String())
@@ -194,7 +201,13 @@ func (c *CConverter) CWriteFields(s *strings.Builder, fields []*ast.Field, depth
 			s.WriteByte('\'')
 		}
 
-		s.WriteString(";\n")
+		s.WriteString(";")
+
+		if comment != "" {
+			s.WriteString(fmt.Sprintf("	// %s", comment))
+		}
+
+		s.WriteString("\n")
 	}
 
 	return nil
@@ -202,6 +215,24 @@ func (c *CConverter) CWriteFields(s *strings.Builder, fields []*ast.Field, depth
 
 func (c *CConverter) FileExtension() string {
 	return "h"
+}
+
+var cIncludeTag string = "c.include"
+
+func (c *CConverter) HandleFileComments(comments []*ast.CommentGroup) error {
+	for _, comment := range comments {
+		lines := strings.Split(comment.Text(), "\n")
+		for _, line := range lines {
+			idx := strings.LastIndex(line, cIncludeTag)
+			if idx >= 0 {
+				include := strings.TrimSpace(line[idx+len(cIncludeTag):])
+				c.Includes = append(c.Includes, include)
+			}
+		}
+
+	}
+
+	return nil
 }
 
 func (c *CConverter) Convert(w *strings.Builder, f ast.Node) error {
@@ -212,29 +243,33 @@ func (c *CConverter) Convert(w *strings.Builder, f ast.Node) error {
 
 	first := true
 
+	builder := new(strings.Builder)
+
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
+		case *ast.File:
+			err = c.HandleFileComments(x.Comments)
 		case *ast.Ident:
 			name = x.Name
 		case *ast.StructType:
 			if !first {
-				w.WriteString("\n\n")
+				builder.WriteString("\n\n")
 			}
 
-			w.WriteString("typedef struct {\n")
+			builder.WriteString("typedef struct {\n")
 
-			err = c.CWriteFields(w, x.Fields.List, 0)
+			err = c.CWriteFields(builder, x.Fields.List, 0)
 			if err != nil {
 				return false
 			}
 
-			w.WriteString("} ")
+			builder.WriteString("} ")
 
 			newName := c.Prefix + name + c.Suffix
 			c.MappedTypes[name] = newName
-			w.WriteString(newName)
+			builder.WriteString(newName)
 
-			w.WriteString(";\n")
+			builder.WriteString(";\n")
 
 			first = false
 
@@ -243,6 +278,19 @@ func (c *CConverter) Convert(w *strings.Builder, f ast.Node) error {
 		}
 		return true
 	})
+
+	w.WriteString("#pragma once\n\n")
+
+	for _, include := range c.Includes {
+		w.WriteString(fmt.Sprintf("#include %s\n", include))
+	}
+
+	if len(c.Includes) > 0 {
+		w.WriteString("\n")
+	}
+
+	w.WriteString("\n")
+	w.WriteString(builder.String())
 
 	return err
 }

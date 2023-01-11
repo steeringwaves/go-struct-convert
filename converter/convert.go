@@ -37,7 +37,7 @@ func ConvertFile(filename string, converter Converter) (*strings.Builder, error)
 	}
 
 	var f ast.Node
-	f, err = parser.ParseExprFrom(token.NewFileSet(), "editor.go", s, parser.SpuriousErrors)
+	f, err = parser.ParseExprFrom(token.NewFileSet(), "editor.go", s, parser.AllErrors|parser.ParseComments)
 	if err != nil {
 		// 		s = fmt.Sprintf(`package main
 
@@ -45,7 +45,7 @@ func ConvertFile(filename string, converter Converter) (*strings.Builder, error)
 		// 	%s
 		// }`, s)
 
-		f, err = parser.ParseFile(token.NewFileSet(), "editor.go", s, parser.SpuriousErrors)
+		f, err = parser.ParseFile(token.NewFileSet(), "editor.go", s, parser.AllErrors|parser.ParseComments)
 		if err != nil {
 			return nil, err
 		}
