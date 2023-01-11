@@ -1,7 +1,6 @@
 package order
 
 import (
-	"decimal"
 	"time"
 )
 
@@ -16,8 +15,6 @@ type User struct {
 	Value   float64 `validate:"presence,min=0"`
 	Self    *Alias
 	Aliases []Alias
-
-	Cost decimal.Decimal `json:"cost,omitempty"`
 
 	Time_of_day time.Time
 

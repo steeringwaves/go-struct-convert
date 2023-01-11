@@ -11,7 +11,11 @@ import (
 	"github.com/fatih/structtag"
 )
 
-type TypescriptConverter struct{}
+type TypescriptConverter struct {
+	Prefix      string
+	Suffix      string
+	MappedTypes map[string]string
+}
 
 var TypescriptIndent = "    "
 
@@ -29,13 +33,16 @@ func TypescriptGetIdent(s string) string {
 	return s
 }
 
-func TypescriptWriteType(s *strings.Builder, t ast.Expr, depth int, optionalParens bool) {
+func (ts *TypescriptConverter) TypescriptWriteType(s *strings.Builder, t ast.Expr, depth int, optionalParens bool) error {
 	switch t := t.(type) {
 	case *ast.StarExpr:
 		if optionalParens {
 			s.WriteByte('(')
 		}
-		TypescriptWriteType(s, t.X, depth, false)
+		err := ts.TypescriptWriteType(s, t.X, depth, false)
+		if err != nil {
+			return err
+		}
 		s.WriteString(" | undefined")
 		if optionalParens {
 			s.WriteByte(')')
@@ -45,18 +52,26 @@ func TypescriptWriteType(s *strings.Builder, t ast.Expr, depth int, optionalPare
 			s.WriteString("string")
 			break
 		}
-		TypescriptWriteType(s, t.Elt, depth, true)
+		err := ts.TypescriptWriteType(s, t.Elt, depth, true)
+		if err != nil {
+			return err
+		}
 		s.WriteString("[]")
 	case *ast.StructType:
 		s.WriteString("{\n")
-		TypescriptWriteFields(s, t.Fields.List, depth+1)
+		ts.TypescriptWriteFields(s, t.Fields.List, depth+1)
 
 		for i := 0; i < depth+1; i++ {
 			s.WriteString(TypescriptIndent)
 		}
 		s.WriteByte('}')
 	case *ast.Ident:
-		s.WriteString(TypescriptGetIdent(t.String()))
+		renamed, ok := ts.MappedTypes[t.String()]
+		if ok {
+			s.WriteString(TypescriptGetIdent(renamed))
+		} else {
+			s.WriteString(TypescriptGetIdent(t.String()))
+		}
 	case *ast.SelectorExpr:
 		longType := fmt.Sprintf("%s.%s", t.X, t.Sel)
 		switch longType {
@@ -69,17 +84,23 @@ func TypescriptWriteType(s *strings.Builder, t ast.Expr, depth int, optionalPare
 		}
 	case *ast.MapType:
 		s.WriteString("{ [key: ")
-		TypescriptWriteType(s, t.Key, depth, false)
+		err := ts.TypescriptWriteType(s, t.Key, depth, false)
+		if err != nil {
+			return err
+		}
 		s.WriteString("]: ")
-		TypescriptWriteType(s, t.Value, depth, false)
+		err = ts.TypescriptWriteType(s, t.Value, depth, false)
+		if err != nil {
+			return err
+		}
 		s.WriteByte('}')
 	case *ast.InterfaceType:
 		s.WriteString("any")
 	default:
-		err := fmt.Errorf("unhandled: %s, %T", t, t)
-		fmt.Println(err)
-		panic(err)
+		return fmt.Errorf("unhandled: %s, %T", t, t)
 	}
+
+	return nil
 }
 
 var TypescriptValidJSNameRegexp = regexp.MustCompile(`(?m)^[\pL_][\pL\pN_]*$`)
@@ -88,7 +109,7 @@ func TypescriptValidJSName(n string) bool {
 	return TypescriptValidJSNameRegexp.MatchString(n)
 }
 
-func TypescriptWriteFields(s *strings.Builder, fields []*ast.Field, depth int) {
+func (ts *TypescriptConverter) TypescriptWriteFields(s *strings.Builder, fields []*ast.Field, depth int) error {
 	for _, f := range fields {
 		optional := false
 
@@ -104,7 +125,7 @@ func TypescriptWriteFields(s *strings.Builder, fields []*ast.Field, depth int) {
 		if f.Tag != nil {
 			tags, err := structtag.Parse(f.Tag.Value[1 : len(f.Tag.Value)-1])
 			if err != nil {
-				panic(err)
+				return err
 			}
 
 			jsonTag, err := tags.Get("json")
@@ -148,14 +169,26 @@ func TypescriptWriteFields(s *strings.Builder, fields []*ast.Field, depth int) {
 
 		s.WriteString(": ")
 
-		TypescriptWriteType(s, f.Type, depth, false)
+		err := ts.TypescriptWriteType(s, f.Type, depth, false)
+		if err != nil {
+			return err
+		}
 
 		s.WriteString(";\n")
 	}
+
+	return nil
+}
+
+func (ts *TypescriptConverter) FileExtension() string {
+	return "ts"
 }
 
 func (ts *TypescriptConverter) Convert(w *strings.Builder, f ast.Node) error {
+	var err error
 	name := "MyInterface"
+
+	ts.MappedTypes = make(map[string]string)
 
 	first := true
 
@@ -169,10 +202,16 @@ func (ts *TypescriptConverter) Convert(w *strings.Builder, f ast.Node) error {
 			}
 
 			w.WriteString("declare interface ")
-			w.WriteString(name)
+
+			newName := ts.Prefix + name + ts.Suffix
+			ts.MappedTypes[name] = newName
+			w.WriteString(newName)
 			w.WriteString(" {\n")
 
-			TypescriptWriteFields(w, x.Fields.List, 0)
+			err = ts.TypescriptWriteFields(w, x.Fields.List, 0)
+			if err != nil {
+				return false
+			}
 
 			w.WriteByte('}')
 

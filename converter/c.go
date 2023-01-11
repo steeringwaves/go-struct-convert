@@ -11,7 +11,11 @@ import (
 	"github.com/fatih/structtag"
 )
 
-type CConverter struct{}
+type CConverter struct {
+	Prefix      string
+	Suffix      string
+	MappedTypes map[string]string
+}
 
 var CIndent = "    "
 
@@ -41,25 +45,36 @@ func CGetIdent(s string) string {
 	return s
 }
 
-func CWriteType(s *strings.Builder, t ast.Expr, depth int, optionalParens bool) {
+func (c *CConverter) CWriteType(s *strings.Builder, t ast.Expr, depth int, optionalParens bool) error {
 	switch t := t.(type) {
 	case *ast.ArrayType: // TODO
 		if v, ok := t.Elt.(*ast.Ident); ok && v.String() == "byte" {
 			s.WriteString("char *")
 			break
 		}
-		CWriteType(s, t.Elt, depth, true)
+		err := c.CWriteType(s, t.Elt, depth, true)
+		if err != nil {
+			return err
+		}
 		s.WriteString("*")
 	case *ast.StructType:
 		s.WriteString("{\n")
-		CWriteFields(s, t.Fields.List, depth+1)
+		err := c.CWriteFields(s, t.Fields.List, depth+1)
+		if err != nil {
+			return err
+		}
 
 		for i := 0; i < depth+1; i++ {
 			s.WriteString(CIndent)
 		}
 		s.WriteByte('}')
 	case *ast.Ident:
-		s.WriteString(CGetIdent(t.String()))
+		renamed, ok := c.MappedTypes[t.String()]
+		if ok {
+			s.WriteString(CGetIdent(renamed))
+		} else {
+			s.WriteString(CGetIdent(t.String()))
+		}
 	case *ast.SelectorExpr:
 		longType := fmt.Sprintf("%s.%s", t.X, t.Sel)
 		switch longType {
@@ -73,10 +88,10 @@ func CWriteType(s *strings.Builder, t ast.Expr, depth int, optionalParens bool) 
 	case *ast.InterfaceType:
 		s.WriteString("void *")
 	default:
-		err := fmt.Errorf("unhandled: %s, %T", t, t)
-		fmt.Println(err)
-		panic(err)
+		return fmt.Errorf("unhandled: %s, %T", t, t)
 	}
+
+	return nil
 }
 
 var CValidCNameRegexp = regexp.MustCompile(`(?m)^[\pL_][\pL\pN_]*$`)
@@ -85,7 +100,7 @@ func CValidCName(n string) bool {
 	return CValidCNameRegexp.MatchString(n)
 }
 
-func CWriteFields(s *strings.Builder, fields []*ast.Field, depth int) {
+func (c *CConverter) CWriteFields(s *strings.Builder, fields []*ast.Field, depth int) error {
 	for _, f := range fields {
 		var fieldName string
 		if len(f.Names) != 0 && f.Names[0] != nil && len(f.Names[0].Name) != 0 {
@@ -102,7 +117,7 @@ func CWriteFields(s *strings.Builder, fields []*ast.Field, depth int) {
 		if f.Tag != nil {
 			tags, err := structtag.Parse(f.Tag.Value[1 : len(f.Tag.Value)-1])
 			if err != nil {
-				panic(err)
+				return err
 			}
 
 			// get ctype tag
@@ -148,7 +163,10 @@ func CWriteFields(s *strings.Builder, fields []*ast.Field, depth int) {
 		if cType != "" {
 			s.WriteString(cType)
 		} else {
-			CWriteType(s, f.Type, depth, false)
+			err := c.CWriteType(s, f.Type, depth, false)
+			if err != nil {
+				return err
+			}
 		}
 
 		if isPointer {
@@ -167,10 +185,19 @@ func CWriteFields(s *strings.Builder, fields []*ast.Field, depth int) {
 
 		s.WriteString(";\n")
 	}
+
+	return nil
+}
+
+func (c *CConverter) FileExtension() string {
+	return "h"
 }
 
 func (c *CConverter) Convert(w *strings.Builder, f ast.Node) error {
+	var err error
 	name := "MyInterface"
+
+	c.MappedTypes = make(map[string]string)
 
 	first := true
 
@@ -185,10 +212,17 @@ func (c *CConverter) Convert(w *strings.Builder, f ast.Node) error {
 
 			w.WriteString("typedef struct {\n")
 
-			CWriteFields(w, x.Fields.List, 0)
+			err = c.CWriteFields(w, x.Fields.List, 0)
+			if err != nil {
+				return false
+			}
 
 			w.WriteString("} ")
-			w.WriteString(name)
+
+			newName := c.Prefix + name + c.Suffix
+			c.MappedTypes[name] = newName
+			w.WriteString(newName)
+
 			w.WriteString(";\n")
 
 			first = false
@@ -199,5 +233,5 @@ func (c *CConverter) Convert(w *strings.Builder, f ast.Node) error {
 		return true
 	})
 
-	return nil
+	return err
 }

@@ -12,6 +12,7 @@ import (
 )
 
 type Converter interface {
+	FileExtension() string
 	Convert(w *strings.Builder, f ast.Node) error
 }
 
