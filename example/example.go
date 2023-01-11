@@ -56,7 +56,7 @@ type ShippingOption struct {
 }
 
 var order struct {
-	OrderID       bid2.Bid2 `json:"orderID"`
+	OrderID       bid2.Bid2 `json:"orderID"` // bid2 is an unknown type
 	InvoiceNumber int       `json:"invoiceNumber"`
 	Name          string    `json:"name"`
 	Active        bool      `json:"active" mysql:"__Active"`
