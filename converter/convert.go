@@ -18,65 +18,10 @@ import (
 
 type Converter interface {
 	FileExtension() string
-	Convert(w *strings.Builder, f []ast.Node) error
-
-	////
 	ValidName(n string) bool
 	GetIdent(s string) string
-	String(mappedTypes map[string]string, comments Comments, structs []Struct) error
-}
-
-func ConvertFile(inputs []string, converter Converter) (*strings.Builder, error) {
-	var asts []ast.Node
-
-	for _, filename := range inputs {
-		stat, err := os.Stat(filename)
-		if err != nil {
-			return nil, err
-		}
-
-		if stat.IsDir() {
-			return nil, errors.New("cannot load a directory")
-		}
-
-		contents, err := os.ReadFile(filename)
-		if err != nil {
-			return nil, err
-		}
-
-		// need to strip out any additional package declarations
-
-		s := strings.TrimSpace(string(contents))
-		if len(s) == 0 {
-			return nil, errors.New("nothing to parse")
-		}
-
-		var f ast.Node
-		f, err = parser.ParseExprFrom(token.NewFileSet(), filename, s, parser.AllErrors|parser.ParseComments)
-		if err != nil {
-			// 		s = fmt.Sprintf(`package main
-
-			// func main() {
-			// 	%s
-			// }`, s)
-
-			f, err = parser.ParseFile(token.NewFileSet(), filename, s, parser.AllErrors|parser.ParseComments)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		asts = append(asts, f)
-	}
-
-	builder := new(strings.Builder)
-	err := converter.Convert(builder, asts)
-	if err != nil {
-		return nil, err
-	}
-
-	return builder, nil
-
+	Builder(w *strings.Builder, inspecter *Inspecter) error
+	GetTypeFromTags(tags *structtag.Tags) (StructMemberType, bool)
 }
 
 type Comments struct {
@@ -167,15 +112,26 @@ type Inspecter struct {
 	Suffix      string
 	MappedTypes map[string]string
 	Comments    Comments
+	Indent      string
 
 	Structs []Struct
 }
+
+type StructMemberType struct {
+	Value     string
+	Prefix    string
+	Suffix    string
+	IsArray   bool
+	IsPointer bool
+	IsMap     bool
+	MapKey    *StructMemberType
+	MapVal    *StructMemberType
+}
+
 type StructMember struct {
-	Name       string
-	Type       string
-	IsPointer  bool
-	TypeSuffix string
-	Comment    string
+	Name    string
+	Type    StructMemberType
+	Comment string
 }
 
 type Struct struct {
@@ -184,39 +140,76 @@ type Struct struct {
 	Comment string
 }
 
-func (inspecter *Inspecter) InspectType(t ast.Expr, depth int, parent *Struct) (string, error) {
+func (inspecter *Inspecter) FileExtension() string {
+	return inspecter.Converter.FileExtension()
+}
+
+func (inspecter *Inspecter) inspectTypes(t ast.Expr, depth int, parent *Struct) (StructMemberType, error) {
+	structType := StructMemberType{}
 	switch t := t.(type) {
 	case *ast.ArrayType: // TODO
 		if v, ok := t.Elt.(*ast.Ident); ok && v.String() == "byte" {
-			return inspecter.Converter.GetIdent("[]byte"), nil
+			structType.Value = inspecter.Converter.GetIdent("string")
+			return structType, nil
 		}
-		res, err := inspecter.InspectType(t.Elt, depth, parent)
+		res, err := inspecter.inspectTypes(t.Elt, depth, parent)
 		if err != nil {
-			return "", err
+			return structType, err
 		}
+		res.IsArray = true
 		return res, nil
 	// case *ast.StructType:
 	// 	// TODO this is wrong
-	// 	_, err := c.InspectType(t.Fields.List, depth+1, parent)
+	// 	_, err := c.inspectTypes(t.Fields.List, depth+1, parent)
 	// 	if err != nil {
 	// 		return "", err
 	// 	}
 
 	case *ast.Ident:
-		return inspecter.Converter.GetIdent(t.String()), nil
+		structType.Value = inspecter.Converter.GetIdent(t.String())
+		return structType, nil
 	case *ast.SelectorExpr:
 		longType := fmt.Sprintf("%s.%s", t.X, t.Sel)
-		return inspecter.Converter.GetIdent(longType), nil
+		structType.Value = inspecter.Converter.GetIdent(longType)
+
+		return structType, nil
 	case *ast.InterfaceType:
-		return inspecter.Converter.GetIdent("interface"), nil
+		structType.Value = inspecter.Converter.GetIdent("interface")
+		return structType, nil
+	case *ast.MapType:
+		res := StructMemberType{IsMap: true}
+
+		mapKeyType, err := inspecter.inspectTypes(t.Key, depth, parent)
+		if err != nil {
+			return res, err
+		}
+		res.MapKey = &mapKeyType
+
+		mapKeyVal, err := inspecter.inspectTypes(t.Value, depth, parent)
+		if err != nil {
+			return res, err
+		}
+		res.MapVal = &mapKeyVal
+		return res, nil
+	// s.WriteString("{ [key: ")
+	// err := ts.TypescriptWriteType(s, t.Key, depth, false)
+	// if err != nil {
+	// 	return err
+	// }
+	// s.WriteString("]: ")
+	// err = ts.TypescriptWriteType(s, t.Value, depth, false)
+	// if err != nil {
+	// 	return err
+	// }
+	// s.WriteByte('}')
 	default:
-		return "", fmt.Errorf("unhandled: %s, %T", t, t)
+		return structType, fmt.Errorf("unhandled: %s, %T", t, t)
 	}
 
-	return "", nil
+	return structType, nil
 }
 
-func (inspecter *Inspecter) InspectFields(fields []*ast.Field, depth int, parent *Struct) error {
+func (inspecter *Inspecter) inspectFields(fields []*ast.Field, depth int, parent *Struct) error {
 	for _, f := range fields {
 		var fieldName string
 		if len(f.Names) != 0 && f.Names[0] != nil && len(f.Names[0].Name) != 0 {
@@ -232,8 +225,8 @@ func (inspecter *Inspecter) InspectFields(fields []*ast.Field, depth int, parent
 		}
 
 		var name string
-		var cType string
-		var cTypeSuffix string
+		var typeFromTag StructMemberType
+		var typeFromTagExists bool
 		// var validator Validator
 		// usingValidator := false
 		if f.Tag != nil {
@@ -242,17 +235,7 @@ func (inspecter *Inspecter) InspectFields(fields []*ast.Field, depth int, parent
 				return err
 			}
 
-			// get ctype tag
-			cTypeTag, err := tags.Get("ctype")
-			if err == nil {
-				idx := strings.Index(cTypeTag.Name, "[")
-				if idx > 0 {
-					cType = cTypeTag.Name[0:idx]
-					cTypeSuffix = cTypeTag.Name[idx:]
-				} else {
-					cType = cTypeTag.Name
-				}
-			}
+			typeFromTag, typeFromTagExists = inspecter.Converter.GetTypeFromTags(tags)
 
 			jsonTag, err := tags.Get("json")
 			if err == nil {
@@ -285,15 +268,16 @@ func (inspecter *Inspecter) InspectFields(fields []*ast.Field, depth int, parent
 		}
 
 		member := StructMember{
-			Name:       name,
-			IsPointer:  isPointer,
-			TypeSuffix: cTypeSuffix,
-			Comment:    comment,
+			Name:    name,
+			Comment: comment,
+			Type: StructMemberType{
+				IsPointer: isPointer,
+			},
 			// TODO what is quoted??
 		}
 
-		if cType != "" {
-			member.Type = cType
+		if typeFromTagExists {
+			member.Type = typeFromTag
 		} else {
 			switch t := f.Type.(type) {
 			case *ast.StructType:
@@ -302,7 +286,7 @@ func (inspecter *Inspecter) InspectFields(fields []*ast.Field, depth int, parent
 					Name: name,
 				}
 
-				err := inspecter.InspectFields(t.Fields.List, 0, &newStruct)
+				err := inspecter.inspectFields(t.Fields.List, 0, &newStruct)
 				if err != nil {
 					return err
 				}
@@ -312,9 +296,9 @@ func (inspecter *Inspecter) InspectFields(fields []*ast.Field, depth int, parent
 				newName := inspecter.Prefix + name + inspecter.Suffix
 				inspecter.MappedTypes[name] = newName
 
-				member.Type = name
+				member.Type.Value = name
 			default:
-				res, err := inspecter.InspectType(f.Type, depth, parent)
+				res, err := inspecter.inspectTypes(f.Type, depth, parent)
 				if err != nil {
 					return err
 				}
@@ -334,12 +318,16 @@ func (inspecter *Inspecter) InspectFields(fields []*ast.Field, depth int, parent
 	return nil
 }
 
-func (inspecter *Inspecter) InspectNodes(asts []ast.Node) error {
+func (inspecter *Inspecter) inspectNodes(asts []ast.Node) error {
 	var err error
 	var name string
 
 	for _, f := range asts {
 		ast.Inspect(f, func(n ast.Node) bool {
+			if err != nil {
+				return false
+			}
+
 			switch x := n.(type) {
 			case *ast.File:
 				err = HandleFileComments(x.Comments, &inspecter.Comments)
@@ -350,7 +338,7 @@ func (inspecter *Inspecter) InspectNodes(asts []ast.Node) error {
 					Name: name,
 				}
 
-				err = inspecter.InspectFields(x.Fields.List, 0, &newStruct)
+				err = inspecter.inspectFields(x.Fields.List, 0, &newStruct)
 				if err != nil {
 					return false
 				}
@@ -358,6 +346,7 @@ func (inspecter *Inspecter) InspectNodes(asts []ast.Node) error {
 				inspecter.Structs = append(inspecter.Structs, newStruct)
 
 				newName := inspecter.Prefix + name + inspecter.Suffix
+
 				inspecter.MappedTypes[name] = newName
 
 				return false
@@ -369,7 +358,7 @@ func (inspecter *Inspecter) InspectNodes(asts []ast.Node) error {
 	return err
 }
 
-func (inspecter *Inspecter) Convert(asts []ast.Node) (string, error) {
+func (inspecter *Inspecter) convert(w *strings.Builder, asts []ast.Node) error {
 	var err error
 	inspecter.MappedTypes = make(map[string]string)
 
@@ -378,12 +367,74 @@ func (inspecter *Inspecter) Convert(asts []ast.Node) (string, error) {
 		inspecter.Comments.CIncludes[i] = CleanCInclude(inspecter.Comments.CIncludes[i])
 	}
 
-	err = inspecter.InspectNodes(asts)
+	err = inspecter.inspectNodes(asts)
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	return inspecter.Converter.String(), nil
+	for i := range inspecter.Structs {
+		renamed, ok := inspecter.MappedTypes[inspecter.Structs[i].Name]
+		if ok {
+			inspecter.Structs[i].Name = renamed
+		}
 
-	return "", err
+		for j := range inspecter.Structs[i].Members {
+			renamed, ok := inspecter.MappedTypes[inspecter.Structs[i].Members[j].Type.Value]
+			if ok {
+				inspecter.Structs[i].Members[j].Type.Value = renamed
+			}
+		}
+	}
+
+	return inspecter.Converter.Builder(w, inspecter)
+}
+
+func (inspecter *Inspecter) ConvertFiles(inputs []string) (*strings.Builder, error) {
+	var asts []ast.Node
+
+	for _, filename := range inputs {
+		stat, err := os.Stat(filename)
+		if err != nil {
+			return nil, err
+		}
+
+		if stat.IsDir() {
+			return nil, errors.New("cannot load a directory")
+		}
+
+		contents, err := os.ReadFile(filename)
+		if err != nil {
+			return nil, err
+		}
+
+		s := strings.TrimSpace(string(contents))
+		if len(s) == 0 {
+			return nil, errors.New("nothing to parse")
+		}
+
+		var f ast.Node
+		f, err = parser.ParseExprFrom(token.NewFileSet(), filename, s, parser.AllErrors|parser.ParseComments)
+		if err != nil {
+			// 		s = fmt.Sprintf(`package main
+
+			// func main() {
+			// 	%s
+			// }`, s)
+
+			f, err = parser.ParseFile(token.NewFileSet(), filename, s, parser.AllErrors|parser.ParseComments)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		asts = append(asts, f)
+	}
+
+	builder := new(strings.Builder)
+	err := inspecter.convert(builder, asts)
+	if err != nil {
+		return nil, err
+	}
+
+	return builder, nil
 }

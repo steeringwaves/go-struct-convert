@@ -6,7 +6,7 @@ import (
 
 // #c.include #include <SystemConfig.h>
 // #c.include <stdint.h>
-// #ts.import import MathLib from "Math/MathLib";
+// #ts.import import moment from "moment";
 
 type Alias struct {
 	Name string `ctype:"char[255]" validate:"presence,min=2,max=32"`
@@ -22,11 +22,13 @@ type User struct { // here we
 	Self    *Alias  // this just points back to ourself
 	Aliases []Alias
 
-	Time_of_day time.Time
+	Time_of_day  time.Time
+	Time_of_year time.Time `tstype:"string | moment.Moment"`
 
 	ByteBuffer []byte
 	Int8Buffer []int8
 	Unknown    interface{}
+	MapValues  map[int]string
 } // another value
 
 type OrderStatus struct {

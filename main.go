@@ -21,11 +21,12 @@ var name string = ""
 var cIncludes []string
 var tsNamespace string = ""
 var tsImports []string
+var indent string = "	"
 
 // var tsRequires []string
 var useStdout bool = true
 
-func doConversion(input []string, output string, c converter.Converter) {
+func doConversion(input []string, output string, inspecter *converter.Inspecter) {
 	if dirname != "" {
 		useStdout = false
 		dirname = path.Clean(dirname)
@@ -45,7 +46,7 @@ func doConversion(input []string, output string, c converter.Converter) {
 		}
 	}
 
-	builder, err := converter.ConvertFile(input, c)
+	builder, err := inspecter.ConvertFiles(input)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -55,7 +56,7 @@ func doConversion(input []string, output string, c converter.Converter) {
 		fmt.Println(builder.String())
 	}
 
-	err = ioutil.WriteFile(path.Join(dirname, fmt.Sprintf("%s.%s", output, c.FileExtension())), []byte(builder.String()), 0644)
+	err = ioutil.WriteFile(path.Join(dirname, fmt.Sprintf("%s.%s", output, inspecter.FileExtension())), []byte(builder.String()), 0644)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -85,10 +86,13 @@ var typescriptCmd = &cobra.Command{
 			outputFilename = strings.TrimSuffix(path.Base(outputFilename), path.Ext(outputFilename))
 		}
 
-		doConversion(inputFiles, outputFilename, &converter.TypescriptConverter{
-			Prefix:    prefix,
-			Suffix:    suffix,
-			Namespace: tsNamespace,
+		doConversion(inputFiles, outputFilename, &converter.Inspecter{
+			Converter: &converter.TypescriptConverter{
+				Namespace: tsNamespace,
+			},
+			Prefix: prefix,
+			Suffix: suffix,
+			Indent: indent,
 			Comments: converter.Comments{
 				TypescriptImports: tsImports,
 				// TypescriptRequires: tsRequires,
@@ -120,9 +124,11 @@ var cCmd = &cobra.Command{
 			outputFilename = strings.TrimSuffix(path.Base(outputFilename), path.Ext(outputFilename))
 		}
 
-		doConversion(inputFiles, outputFilename, &converter.CConverter{
-			Prefix: prefix,
-			Suffix: suffix,
+		doConversion(inputFiles, outputFilename, &converter.Inspecter{
+			Converter: &converter.CConverter{},
+			Prefix:    prefix,
+			Suffix:    suffix,
+			Indent:    indent,
 			Comments: converter.Comments{
 				CIncludes: cIncludes,
 			},
