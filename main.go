@@ -18,7 +18,9 @@ var dirname string = ""
 var prefix string = ""
 var suffix string = ""
 var name string = ""
+var cIncludes []string
 var tsNamespace string = ""
+var tsImports []string
 var useStdout bool = true
 
 func doConversion(input string, output string, c converter.Converter) {
@@ -88,6 +90,9 @@ var typescriptCmd = &cobra.Command{
 			Prefix:    prefix,
 			Suffix:    suffix,
 			Namespace: tsNamespace,
+			Comments: converter.Comments{
+				TypescriptImports: tsImports,
+			},
 		})
 	},
 }
@@ -121,6 +126,9 @@ var cCmd = &cobra.Command{
 		doConversion(inputFile, outputFilename, &converter.CConverter{
 			Prefix: prefix,
 			Suffix: suffix,
+			Comments: converter.Comments{
+				CIncludes: cIncludes,
+			},
 		})
 	},
 }
@@ -134,7 +142,10 @@ func main() {
 	rootCmd.PersistentFlags().StringVarP(&prefix, "prefix", "", "", "the prefix for each struct name to add")
 	rootCmd.PersistentFlags().StringVarP(&suffix, "suffix", "", "", "the suffix for each struct name to add")
 
+	cCmd.Flags().StringSliceVarP(&cIncludes, "include", "", []string{}, "include statements to add (do not include #include it will be added automatically)")
+
 	typescriptCmd.Flags().StringVarP(&tsNamespace, "namespace", "", "", "the namespace for each struct name to add (default will be whatever name is)")
+	typescriptCmd.Flags().StringSliceVarP(&tsImports, "import", "", []string{}, "import statements to add")
 
 	rootCmd.AddCommand(typescriptCmd)
 	rootCmd.AddCommand(cCmd)

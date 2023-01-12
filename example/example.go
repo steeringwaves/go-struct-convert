@@ -4,9 +4,9 @@ import (
 	"time"
 )
 
-// #c.include <SystemConfig.h>
+// #c.include #include <SystemConfig.h>
 // #c.include <stdint.h>
-// ts.import import MathLib from "Math/MathLib";
+// #ts.import import MathLib from "Math/MathLib";
 
 type Alias struct {
 	Name string `ctype:"char[255]" validate:"presence,min=2,max=32"`

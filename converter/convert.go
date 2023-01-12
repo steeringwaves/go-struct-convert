@@ -4,11 +4,14 @@ import (
 	_ "embed"
 	"errors"
 	"os"
+	"regexp"
 	"strings"
 
 	"go/ast"
 	"go/parser"
 	"go/token"
+
+	"github.com/samber/lo"
 )
 
 type Converter interface {
@@ -59,4 +62,85 @@ func ConvertFile(filename string, converter Converter) (*strings.Builder, error)
 
 	return builder, nil
 
+}
+
+type Comments struct {
+	CIncludes []string
+
+	TypescriptImports []string
+}
+
+func CleanCInclude(str string) string {
+	// be nice and clean up user includes
+	var re = regexp.MustCompile(`(?m)([\s]*#[\s]*include[\s]*)`)
+
+	cleaned := strings.TrimSpace(str)
+	for _, match := range re.FindAllString(cleaned, -1) {
+		cleaned = cleaned[len(match):]
+		break
+	}
+
+	return cleaned
+}
+
+func CleanTypescriptImport(str string) string {
+	// be nice and clean up user imports
+	var re = regexp.MustCompile(`(?m)([\s]*import[\s]*)`)
+
+	cleaned := strings.TrimSpace(str)
+	for _, match := range re.FindAllString(cleaned, -1) {
+		cleaned = cleaned[len(match):]
+		break
+	}
+
+	// remove trailing semicolons
+	var semiRe = regexp.MustCompile(`(?m)([;]+.*)`)
+	matches := semiRe.FindAllString(cleaned, -1)
+	if len(matches) == 1 {
+		cleaned = cleaned[:len(cleaned)-len(matches[0])]
+	}
+
+	return cleaned
+}
+
+var cIncludeRe = regexp.MustCompile(`(?m)([\s]*#[\s]*c.include[\s]*)`)
+var tsImportRe = regexp.MustCompile(`(?m)([\s]*#[\s]*ts.import[\s]*)`)
+
+func HandleFileComments(comments []*ast.CommentGroup, result *Comments) error {
+	for _, comment := range comments {
+		lines := strings.Split(comment.Text(), "\n")
+		for _, line := range lines {
+			matches := cIncludeRe.FindAllString(line, -1)
+			if len(matches) == 1 {
+				cleaned := CleanCInclude(line[len(matches[0]):])
+
+				_, exists := lo.Find[string](result.CIncludes, func(i string) bool {
+					return i == cleaned
+				})
+
+				if !exists {
+					result.CIncludes = append(result.CIncludes, cleaned)
+				}
+
+				continue
+			}
+
+			matches = tsImportRe.FindAllString(line, -1)
+			if len(matches) == 1 {
+				cleaned := CleanTypescriptImport(line[len(matches[0]):])
+
+				_, exists := lo.Find[string](result.TypescriptImports, func(i string) bool {
+					return i == cleaned
+				})
+
+				if !exists {
+					result.TypescriptImports = append(result.TypescriptImports, cleaned)
+				}
+
+				continue
+			}
+		}
+	}
+
+	return nil
 }

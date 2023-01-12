@@ -15,8 +15,7 @@ type CConverter struct {
 	Prefix      string
 	Suffix      string
 	MappedTypes map[string]string
-
-	Includes []string
+	Comments    Comments
 }
 
 var CIndent = "    "
@@ -217,24 +216,6 @@ func (c *CConverter) FileExtension() string {
 	return "h"
 }
 
-var cIncludeTag string = "c.include"
-
-func (c *CConverter) HandleFileComments(comments []*ast.CommentGroup) error {
-	for _, comment := range comments {
-		lines := strings.Split(comment.Text(), "\n")
-		for _, line := range lines {
-			idx := strings.LastIndex(line, cIncludeTag)
-			if idx >= 0 {
-				include := strings.TrimSpace(line[idx+len(cIncludeTag):])
-				c.Includes = append(c.Includes, include)
-			}
-		}
-
-	}
-
-	return nil
-}
-
 func (c *CConverter) Convert(w *strings.Builder, f ast.Node) error {
 	var err error
 	name := "MyInterface"
@@ -245,10 +226,15 @@ func (c *CConverter) Convert(w *strings.Builder, f ast.Node) error {
 
 	builder := new(strings.Builder)
 
+	// clean user includes for them
+	for i := range c.Comments.CIncludes {
+		c.Comments.CIncludes[i] = CleanCInclude(c.Comments.CIncludes[i])
+	}
+
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.File:
-			err = c.HandleFileComments(x.Comments)
+			err = HandleFileComments(x.Comments, &c.Comments)
 		case *ast.Ident:
 			name = x.Name
 		case *ast.StructType:
@@ -281,11 +267,13 @@ func (c *CConverter) Convert(w *strings.Builder, f ast.Node) error {
 
 	w.WriteString("#pragma once\n\n")
 
-	for _, include := range c.Includes {
+	fmt.Println("includes", c.Comments.CIncludes)
+
+	for _, include := range c.Comments.CIncludes {
 		w.WriteString(fmt.Sprintf("#include %s\n", include))
 	}
 
-	if len(c.Includes) > 0 {
+	if len(c.Comments.CIncludes) > 0 {
 		w.WriteString("\n")
 	}
 

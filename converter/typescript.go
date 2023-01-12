@@ -16,8 +16,7 @@ type TypescriptConverter struct {
 	Prefix      string
 	Suffix      string
 	MappedTypes map[string]string
-
-	Imports []string
+	Comments    Comments
 }
 
 var TypescriptIndent = "    "
@@ -198,23 +197,6 @@ func (ts *TypescriptConverter) FileExtension() string {
 	return "ts"
 }
 
-var tsImportTag string = "ts.import"
-
-func (ts *TypescriptConverter) HandleFileComments(comments []*ast.CommentGroup) error {
-	for _, comment := range comments {
-		lines := strings.Split(comment.Text(), "\n")
-		for _, line := range lines {
-			idx := strings.LastIndex(line, tsImportTag)
-			if idx >= 0 {
-				imports := strings.TrimSpace(line[idx+len(tsImportTag):])
-				ts.Imports = append(ts.Imports, imports)
-			}
-		}
-	}
-
-	return nil
-}
-
 func (ts *TypescriptConverter) Convert(w *strings.Builder, f ast.Node) error {
 	var err error
 	name := "MyInterface"
@@ -228,7 +210,7 @@ func (ts *TypescriptConverter) Convert(w *strings.Builder, f ast.Node) error {
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.File:
-			err = ts.HandleFileComments(x.Comments)
+			err = HandleFileComments(x.Comments, &ts.Comments)
 		case *ast.Ident:
 			name = x.Name
 		case *ast.StructType:
@@ -274,15 +256,15 @@ func (ts *TypescriptConverter) Convert(w *strings.Builder, f ast.Node) error {
 		return true
 	})
 
-	for _, imports := range ts.Imports {
-		w.WriteString(fmt.Sprintf("%s\n", imports))
+	for _, imports := range ts.Comments.TypescriptImports {
+		w.WriteString(fmt.Sprintf("import %s;\n", imports))
 	}
 
 	if ts.Namespace != "" {
 		w.WriteString(fmt.Sprintf("namespace %s {\n", ts.Namespace))
 	}
 
-	if len(ts.Imports) > 0 {
+	if len(ts.Comments.TypescriptImports) > 0 {
 		w.WriteString("\n")
 	}
 
