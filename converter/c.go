@@ -36,10 +36,12 @@ type CConverter struct {
 
 var CIndent = "    "
 
-func CGetIdent(s string) string {
+func (c *CConverter) GetIdent(s string) string {
 	switch s {
 	case "byte":
 		return "char"
+	case "[]byte":
+		return "char *"
 	case "string":
 		return "char *"
 	case "bool":
@@ -57,6 +59,13 @@ func CGetIdent(s string) string {
 	case "int8", "int16", "int32", "int64",
 		"uint8", "uint16", "uint32", "uint64":
 		return fmt.Sprintf("%s_t", s)
+	case "time.Time":
+		// TODO shouldn't this just be an int64?
+		return "int64_t"
+	case "decimal.Decimal":
+		return "double"
+	case "interface", "interface{}":
+		return "void *"
 	}
 
 	return s
@@ -64,7 +73,7 @@ func CGetIdent(s string) string {
 
 var CValidCNameRegexp = regexp.MustCompile(`(?m)^[\pL_][\pL\pN_]*$`)
 
-func CValidCName(n string) bool {
+func (c *CConverter) ValidName(n string) bool {
 	return CValidCNameRegexp.MatchString(n)
 }
 
@@ -76,7 +85,7 @@ func (c *CConverter) InspectType(t ast.Expr, depth int, parent *CStruct) (string
 	switch t := t.(type) {
 	case *ast.ArrayType: // TODO
 		if v, ok := t.Elt.(*ast.Ident); ok && v.String() == "byte" {
-			return "char *", nil
+			return c.GetIdent("[]byte"), nil
 		}
 		res, err := c.InspectType(t.Elt, depth, parent)
 		if err != nil {
@@ -91,20 +100,12 @@ func (c *CConverter) InspectType(t ast.Expr, depth int, parent *CStruct) (string
 	// 	}
 
 	case *ast.Ident:
-		return CGetIdent(t.String()), nil
+		return c.GetIdent(t.String()), nil
 	case *ast.SelectorExpr:
 		longType := fmt.Sprintf("%s.%s", t.X, t.Sel)
-		switch longType {
-		case "time.Time":
-			// TODO shouldn't this just be an int64?
-			return "int64_t", nil
-		case "decimal.Decimal":
-			return "double", nil
-		default:
-			return longType, nil
-		}
+		return c.GetIdent(longType), nil
 	case *ast.InterfaceType:
-		return "void *", nil
+		return c.GetIdent("interface"), nil
 	default:
 		return "", fmt.Errorf("unhandled: %s, %T", t, t)
 	}
@@ -265,38 +266,27 @@ func (c *CConverter) InspectNodes(asts []ast.Node) error {
 	return err
 }
 
-func (c *CConverter) Convert(w *strings.Builder, asts []ast.Node) error {
+func (c *CConverter) String(mappedTypes map[string]string, comments Comments, structs []Struct) error {
 	var err error
-	c.MappedTypes = make(map[string]string)
-
-	// clean user includes for them
-	for i := range c.Comments.CIncludes {
-		c.Comments.CIncludes[i] = CleanCInclude(c.Comments.CIncludes[i])
-	}
-
-	err = c.InspectNodes(asts)
-	if err != nil {
-		return err
-	}
-
+	w := new(strings.Builder)
 	w.WriteString("#pragma once\n\n")
 
-	for _, include := range c.Comments.CIncludes {
+	for _, include := range comments.CIncludes {
 		w.WriteString(fmt.Sprintf("#include %s\n", include))
 	}
 
-	if len(c.Comments.CIncludes) > 0 {
+	if len(comments.CIncludes) > 0 {
 		w.WriteString("\n")
 	}
 
 	w.WriteString("\n")
 
-	for _, cStruct := range c.Structs {
+	for _, cStruct := range structs {
 		w.WriteString("typedef struct {\n")
 
 		for _, member := range cStruct.Members {
 
-			renamed, ok := c.MappedTypes[member.Type]
+			renamed, ok := mappedTypes[member.Type]
 			if !ok {
 				renamed = member.Type
 			}
