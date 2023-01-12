@@ -11,11 +11,24 @@ import (
 	"github.com/fatih/structtag"
 )
 
+type CMember struct {
+	Name       string
+	Type       string
+	TypeSuffix string
+}
+
+type CStruct struct {
+	Name    string
+	Members []CMember
+}
+
 type CConverter struct {
 	Prefix      string
 	Suffix      string
 	MappedTypes map[string]string
 	Comments    Comments
+
+	Structs []CStruct
 }
 
 var CIndent = "    "

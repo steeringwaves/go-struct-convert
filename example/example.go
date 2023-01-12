@@ -67,3 +67,9 @@ var order struct {
 
 	AnotherFile Another
 }
+
+type Nested struct {
+	Values struct {
+		Name string `ctype:"char[255]"`
+	}
+}

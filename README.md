@@ -7,10 +7,11 @@
 
 - [x] Generate c header from go file
 - [x] Generate typescript from go file
+- [ ] Parse nested go structs
+- [ ] Parse multiple go files
 
 ### go -> c
 
-- [ ] Parse multiple go files and combine them into a single header
 - [x] Generate c header from single go file and include declarations for all structs and struct members
 - [ ] Generate c header from multiple go files and include declarations for all structs and struct members
 - [x] Generate c header with an optional prefix that is applied to all struct types `--prefix <name>`
@@ -23,7 +24,6 @@
 
 ### go -> ts
 
-- [ ] Parse multiple go files and combine them into a typescript file
 - [x] Generate typescript from single go file and include interface declarations for all structs and struct members
 - [ ] Generate typescript from multiple go files and include interface declarations for all structs and struct members
 - [x] Generate typescript with an optional namespace `--namespace <name>` and nest all interface declartions underneath
