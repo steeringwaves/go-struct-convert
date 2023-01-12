@@ -16,46 +16,54 @@ import (
 
 type Converter interface {
 	FileExtension() string
-	Convert(w *strings.Builder, f ast.Node) error
+	Convert(w *strings.Builder, f []ast.Node) error
 }
 
-func ConvertFile(filename string, converter Converter) (*strings.Builder, error) {
-	stat, err := os.Stat(filename)
-	if err != nil {
-		return nil, err
-	}
+func ConvertFile(inputs []string, converter Converter) (*strings.Builder, error) {
+	var asts []ast.Node
 
-	if stat.IsDir() {
-		return nil, errors.New("cannot load a directory")
-	}
-
-	contents, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-
-	s := strings.TrimSpace(string(contents))
-	if len(s) == 0 {
-		return nil, errors.New("nothing to parse")
-	}
-
-	var f ast.Node
-	f, err = parser.ParseExprFrom(token.NewFileSet(), "editor.go", s, parser.AllErrors|parser.ParseComments)
-	if err != nil {
-		// 		s = fmt.Sprintf(`package main
-
-		// func main() {
-		// 	%s
-		// }`, s)
-
-		f, err = parser.ParseFile(token.NewFileSet(), "editor.go", s, parser.AllErrors|parser.ParseComments)
+	for _, filename := range inputs {
+		stat, err := os.Stat(filename)
 		if err != nil {
 			return nil, err
 		}
+
+		if stat.IsDir() {
+			return nil, errors.New("cannot load a directory")
+		}
+
+		contents, err := os.ReadFile(filename)
+		if err != nil {
+			return nil, err
+		}
+
+		// need to strip out any additional package declarations
+
+		s := strings.TrimSpace(string(contents))
+		if len(s) == 0 {
+			return nil, errors.New("nothing to parse")
+		}
+
+		var f ast.Node
+		f, err = parser.ParseExprFrom(token.NewFileSet(), filename, s, parser.AllErrors|parser.ParseComments)
+		if err != nil {
+			// 		s = fmt.Sprintf(`package main
+
+			// func main() {
+			// 	%s
+			// }`, s)
+
+			f, err = parser.ParseFile(token.NewFileSet(), filename, s, parser.AllErrors|parser.ParseComments)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		asts = append(asts, f)
 	}
 
 	builder := new(strings.Builder)
-	err = converter.Convert(builder, f)
+	err := converter.Convert(builder, asts)
 	if err != nil {
 		return nil, err
 	}

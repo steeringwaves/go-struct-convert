@@ -216,7 +216,7 @@ func (c *CConverter) FileExtension() string {
 	return "h"
 }
 
-func (c *CConverter) Convert(w *strings.Builder, f ast.Node) error {
+func (c *CConverter) Convert(w *strings.Builder, asts []ast.Node) error {
 	var err error
 	name := "MyInterface"
 
@@ -231,43 +231,43 @@ func (c *CConverter) Convert(w *strings.Builder, f ast.Node) error {
 		c.Comments.CIncludes[i] = CleanCInclude(c.Comments.CIncludes[i])
 	}
 
-	ast.Inspect(f, func(n ast.Node) bool {
-		switch x := n.(type) {
-		case *ast.File:
-			err = HandleFileComments(x.Comments, &c.Comments)
-		case *ast.Ident:
-			name = x.Name
-		case *ast.StructType:
-			if !first {
-				builder.WriteString("\n\n")
-			}
+	for _, f := range asts {
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.File:
+				err = HandleFileComments(x.Comments, &c.Comments)
+			case *ast.Ident:
+				name = x.Name
+			case *ast.StructType:
+				if !first {
+					builder.WriteString("\n\n")
+				}
 
-			builder.WriteString("typedef struct {\n")
+				builder.WriteString("typedef struct {\n")
 
-			err = c.CWriteFields(builder, x.Fields.List, 0)
-			if err != nil {
+				err = c.CWriteFields(builder, x.Fields.List, 0)
+				if err != nil {
+					return false
+				}
+
+				builder.WriteString("} ")
+
+				newName := c.Prefix + name + c.Suffix
+				c.MappedTypes[name] = newName
+				builder.WriteString(newName)
+
+				builder.WriteString(";\n")
+
+				first = false
+
+				// TODO: allow multiple structs
 				return false
 			}
-
-			builder.WriteString("} ")
-
-			newName := c.Prefix + name + c.Suffix
-			c.MappedTypes[name] = newName
-			builder.WriteString(newName)
-
-			builder.WriteString(";\n")
-
-			first = false
-
-			// TODO: allow multiple structs
-			return false
-		}
-		return true
-	})
+			return true
+		})
+	}
 
 	w.WriteString("#pragma once\n\n")
-
-	fmt.Println("includes", c.Comments.CIncludes)
 
 	for _, include := range c.Comments.CIncludes {
 		w.WriteString(fmt.Sprintf("#include %s\n", include))

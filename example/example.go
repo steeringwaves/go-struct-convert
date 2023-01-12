@@ -64,4 +64,6 @@ var order struct {
 	OrderStatus OrderStatus `json:"orderStatus"`
 
 	OrderShippingOptions []ShippingOption `json:"orderShippingOptions,omitempty"`
+
+	AnotherFile Another
 }

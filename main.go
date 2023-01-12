@@ -13,7 +13,7 @@ import (
 	"github.com/steeringwaves/go-struct-convert/converter"
 )
 
-var inputFile string = ""
+var inputFiles []string
 var dirname string = ""
 var prefix string = ""
 var suffix string = ""
@@ -21,9 +21,11 @@ var name string = ""
 var cIncludes []string
 var tsNamespace string = ""
 var tsImports []string
+
+// var tsRequires []string
 var useStdout bool = true
 
-func doConversion(input string, output string, c converter.Converter) {
+func doConversion(input []string, output string, c converter.Converter) {
 	if dirname != "" {
 		useStdout = false
 		dirname = path.Clean(dirname)
@@ -65,33 +67,31 @@ var typescriptCmd = &cobra.Command{
 	Short: "Converts go structs to typescript",
 	Long:  `This command converts go structs to typescript`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if inputFile == "" {
+		if len(inputFiles) == 0 {
 			if len(args) == 0 {
 				fmt.Fprintln(os.Stderr, "no files specified")
 				os.Exit(1)
 			}
 
-			if len(args) > 1 {
-				fmt.Fprintln(os.Stderr, "too many files specified")
-				os.Exit(1)
+			for i := range args {
+				inputFiles = append(inputFiles, args[i])
 			}
-
-			inputFile = args[0]
 		}
 
 		outputFilename := name
 		if outputFilename == "" {
-			outputFilename = strings.TrimSuffix(path.Base(inputFile), path.Ext(inputFile))
+			outputFilename = strings.TrimSuffix(path.Base(inputFiles[0]), path.Ext(inputFiles[0]))
 		} else {
 			outputFilename = strings.TrimSuffix(path.Base(outputFilename), path.Ext(outputFilename))
 		}
 
-		doConversion(inputFile, outputFilename, &converter.TypescriptConverter{
+		doConversion(inputFiles, outputFilename, &converter.TypescriptConverter{
 			Prefix:    prefix,
 			Suffix:    suffix,
 			Namespace: tsNamespace,
 			Comments: converter.Comments{
 				TypescriptImports: tsImports,
+				// TypescriptRequires: tsRequires,
 			},
 		})
 	},
@@ -102,28 +102,25 @@ var cCmd = &cobra.Command{
 	Short: "Converts go structs to c",
 	Long:  `This command converts go structs to c`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if inputFile == "" {
+		if len(inputFiles) == 0 {
 			if len(args) == 0 {
 				fmt.Fprintln(os.Stderr, "no files specified")
 				os.Exit(1)
 			}
 
-			if len(args) > 1 {
-				fmt.Fprintln(os.Stderr, "too many files specified")
-				os.Exit(1)
+			for i := range args {
+				inputFiles = append(inputFiles, args[i])
 			}
-
-			inputFile = args[0]
 		}
 
 		outputFilename := name
 		if outputFilename == "" {
-			outputFilename = strings.TrimSuffix(path.Base(inputFile), path.Ext(inputFile))
+			outputFilename = strings.TrimSuffix(path.Base(inputFiles[0]), path.Ext(inputFiles[0]))
 		} else {
 			outputFilename = strings.TrimSuffix(path.Base(outputFilename), path.Ext(outputFilename))
 		}
 
-		doConversion(inputFile, outputFilename, &converter.CConverter{
+		doConversion(inputFiles, outputFilename, &converter.CConverter{
 			Prefix: prefix,
 			Suffix: suffix,
 			Comments: converter.Comments{
@@ -136,16 +133,20 @@ var cCmd = &cobra.Command{
 func main() {
 	var rootCmd = &cobra.Command{Use: os.Args[0]}
 
-	rootCmd.PersistentFlags().StringVarP(&inputFile, "input", "i", "", "the input file to parse")
+	rootCmd.PersistentFlags().StringSliceVarP(&inputFiles, "input", "i", []string{}, "the input file(s) to parse")
 	rootCmd.PersistentFlags().StringVarP(&dirname, "output", "o", "", "the output directory to save to instead of stdout")
 	rootCmd.PersistentFlags().StringVarP(&name, "name", "n", "", "the name for the output file (extension is added automatically)")
 	rootCmd.PersistentFlags().StringVarP(&prefix, "prefix", "", "", "the prefix for each struct name to add")
 	rootCmd.PersistentFlags().StringVarP(&suffix, "suffix", "", "", "the suffix for each struct name to add")
 
+	// TODO cobra won't let users specify --include "#include \"myfile.h\"" (it doesn't like the quotes)
 	cCmd.Flags().StringSliceVarP(&cIncludes, "include", "", []string{}, "include statements to add (do not include #include it will be added automatically)")
 
-	typescriptCmd.Flags().StringVarP(&tsNamespace, "namespace", "", "", "the namespace for each struct name to add (default will be whatever name is)")
+	typescriptCmd.Flags().StringVarP(&tsNamespace, "namespace", "", "", "the namespace to create and nest all interfaces under")
 	typescriptCmd.Flags().StringSliceVarP(&tsImports, "import", "", []string{}, "import statements to add")
+
+	// TODO if we need to add require statements, it will be messy dealing with cleaning the string `const { mything, anotherthing } = require('lodash');`
+	// typescriptCmd.Flags().StringSliceVarP(&tsRequires, "require", "", []string{}, "require statements to add")
 
 	rootCmd.AddCommand(typescriptCmd)
 	rootCmd.AddCommand(cCmd)

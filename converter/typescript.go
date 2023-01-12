@@ -197,7 +197,7 @@ func (ts *TypescriptConverter) FileExtension() string {
 	return "ts"
 }
 
-func (ts *TypescriptConverter) Convert(w *strings.Builder, f ast.Node) error {
+func (ts *TypescriptConverter) Convert(w *strings.Builder, asts []ast.Node) error {
 	var err error
 	name := "MyInterface"
 
@@ -207,54 +207,61 @@ func (ts *TypescriptConverter) Convert(w *strings.Builder, f ast.Node) error {
 
 	first := true
 
-	ast.Inspect(f, func(n ast.Node) bool {
-		switch x := n.(type) {
-		case *ast.File:
-			err = HandleFileComments(x.Comments, &ts.Comments)
-		case *ast.Ident:
-			name = x.Name
-		case *ast.StructType:
-			if !first {
-				builder.WriteString("\n\n")
-			}
+	// clean user includes for them
+	for i := range ts.Comments.TypescriptImports {
+		ts.Comments.TypescriptImports[i] = CleanTypescriptImport(ts.Comments.TypescriptImports[i])
+	}
 
-			depth := 0
-			if ts.Namespace != "" {
-				depth++
-			}
+	for _, f := range asts {
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.File:
+				err = HandleFileComments(x.Comments, &ts.Comments)
+			case *ast.Ident:
+				name = x.Name
+			case *ast.StructType:
+				if !first {
+					builder.WriteString("\n\n")
+				}
 
-			for i := 0; i < depth; i++ {
-				builder.WriteString(TypescriptIndent)
-			}
+				depth := 0
+				if ts.Namespace != "" {
+					depth++
+				}
 
-			if ts.Namespace != "" {
-				builder.WriteString("export interface ")
-			} else {
-				builder.WriteString("declare interface ")
-			}
+				for i := 0; i < depth; i++ {
+					builder.WriteString(TypescriptIndent)
+				}
 
-			newName := ts.Prefix + name + ts.Suffix
-			ts.MappedTypes[name] = newName
-			builder.WriteString(newName)
-			builder.WriteString(" {\n")
+				if ts.Namespace != "" {
+					builder.WriteString("export interface ")
+				} else {
+					builder.WriteString("declare interface ")
+				}
 
-			err = ts.TypescriptWriteFields(builder, x.Fields.List, depth)
-			if err != nil {
+				newName := ts.Prefix + name + ts.Suffix
+				ts.MappedTypes[name] = newName
+				builder.WriteString(newName)
+				builder.WriteString(" {\n")
+
+				err = ts.TypescriptWriteFields(builder, x.Fields.List, depth)
+				if err != nil {
+					return false
+				}
+
+				for i := 0; i < depth; i++ {
+					builder.WriteString(TypescriptIndent)
+				}
+				builder.WriteByte('}')
+
+				first = false
+
+				// TODO: allow multiple structs
 				return false
 			}
-
-			for i := 0; i < depth; i++ {
-				builder.WriteString(TypescriptIndent)
-			}
-			builder.WriteByte('}')
-
-			first = false
-
-			// TODO: allow multiple structs
-			return false
-		}
-		return true
-	})
+			return true
+		})
+	}
 
 	for _, imports := range ts.Comments.TypescriptImports {
 		w.WriteString(fmt.Sprintf("import %s;\n", imports))
