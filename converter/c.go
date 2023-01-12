@@ -14,12 +14,15 @@ import (
 type CMember struct {
 	Name       string
 	Type       string
+	IsPointer  bool
 	TypeSuffix string
+	Comment    string
 }
 
 type CStruct struct {
 	Name    string
 	Members []CMember
+	Comment string
 }
 
 type CConverter struct {
@@ -59,62 +62,57 @@ func CGetIdent(s string) string {
 	return s
 }
 
-func (c *CConverter) CWriteType(s *strings.Builder, t ast.Expr, depth int, optionalParens bool) error {
-	switch t := t.(type) {
-	case *ast.ArrayType: // TODO
-		if v, ok := t.Elt.(*ast.Ident); ok && v.String() == "byte" {
-			s.WriteString("char *")
-			break
-		}
-		err := c.CWriteType(s, t.Elt, depth, true)
-		if err != nil {
-			return err
-		}
-		s.WriteString("*")
-	case *ast.StructType:
-		s.WriteString("{\n")
-		err := c.CWriteFields(s, t.Fields.List, depth+1)
-		if err != nil {
-			return err
-		}
-
-		for i := 0; i < depth+1; i++ {
-			s.WriteString(CIndent)
-		}
-		s.WriteByte('}')
-	case *ast.Ident:
-		renamed, ok := c.MappedTypes[t.String()]
-		if ok {
-			s.WriteString(CGetIdent(renamed))
-		} else {
-			s.WriteString(CGetIdent(t.String()))
-		}
-	case *ast.SelectorExpr:
-		longType := fmt.Sprintf("%s.%s", t.X, t.Sel)
-		switch longType {
-		case "time.Time":
-			s.WriteString("char *") // TODO
-		case "decimal.Decimal":
-			s.WriteString("double")
-		default:
-			s.WriteString(longType)
-		}
-	case *ast.InterfaceType:
-		s.WriteString("void *")
-	default:
-		return fmt.Errorf("unhandled: %s, %T", t, t)
-	}
-
-	return nil
-}
-
 var CValidCNameRegexp = regexp.MustCompile(`(?m)^[\pL_][\pL\pN_]*$`)
 
 func CValidCName(n string) bool {
 	return CValidCNameRegexp.MatchString(n)
 }
 
-func (c *CConverter) CWriteFields(s *strings.Builder, fields []*ast.Field, depth int) error {
+func (c *CConverter) FileExtension() string {
+	return "h"
+}
+
+func (c *CConverter) InspectType(t ast.Expr, depth int, parent *CStruct) (string, error) {
+	switch t := t.(type) {
+	case *ast.ArrayType: // TODO
+		if v, ok := t.Elt.(*ast.Ident); ok && v.String() == "byte" {
+			return "char *", nil
+		}
+		res, err := c.InspectType(t.Elt, depth, parent)
+		if err != nil {
+			return "", err
+		}
+		return res, nil
+	// case *ast.StructType:
+	// 	// TODO this is wrong
+	// 	_, err := c.InspectType(t.Fields.List, depth+1, parent)
+	// 	if err != nil {
+	// 		return "", err
+	// 	}
+
+	case *ast.Ident:
+		return CGetIdent(t.String()), nil
+	case *ast.SelectorExpr:
+		longType := fmt.Sprintf("%s.%s", t.X, t.Sel)
+		switch longType {
+		case "time.Time":
+			// TODO shouldn't this just be an int64?
+			return "int64_t", nil
+		case "decimal.Decimal":
+			return "double", nil
+		default:
+			return longType, nil
+		}
+	case *ast.InterfaceType:
+		return "void *", nil
+	default:
+		return "", fmt.Errorf("unhandled: %s, %T", t, t)
+	}
+
+	return "", nil
+}
+
+func (c *CConverter) InspectFields(fields []*ast.Field, depth int, parent *CStruct) error {
 	for _, f := range fields {
 		var fieldName string
 		if len(f.Names) != 0 && f.Names[0] != nil && len(f.Names[0].Name) != 0 {
@@ -173,11 +171,7 @@ func (c *CConverter) CWriteFields(s *strings.Builder, fields []*ast.Field, depth
 			name = fieldName
 		}
 
-		for i := 0; i < depth+1; i++ {
-			s.WriteString(CIndent)
-		}
-
-		quoted := !CValidCName(name)
+		// quoted := !CValidCName(name)
 		isPointer := false
 
 		switch t := f.Type.(type) {
@@ -186,63 +180,59 @@ func (c *CConverter) CWriteFields(s *strings.Builder, fields []*ast.Field, depth
 			isPointer = true
 		}
 
+		member := CMember{
+			Name:       name,
+			IsPointer:  isPointer,
+			TypeSuffix: cTypeSuffix,
+			Comment:    comment,
+			// TODO what is quoted??
+		}
+
 		if cType != "" {
-			s.WriteString(cType)
+			member.Type = cType
 		} else {
-			err := c.CWriteType(s, f.Type, depth, false)
-			if err != nil {
-				return err
+			switch t := f.Type.(type) {
+			case *ast.StructType:
+				// Nested struct, deal with it
+				cStruct := CStruct{
+					Name: name,
+				}
+
+				err := c.InspectFields(t.Fields.List, 0, &cStruct)
+				if err != nil {
+					return err
+				}
+
+				c.Structs = append(c.Structs, cStruct)
+
+				newName := c.Prefix + name + c.Suffix
+				c.MappedTypes[name] = newName
+
+				member.Type = name
+			default:
+				res, err := c.InspectType(f.Type, depth, parent)
+				if err != nil {
+					return err
+				}
+
+				// TODO what if it's another struct??????
+				member.Type = res
 			}
 		}
 
-		if isPointer {
-			s.WriteByte('*')
-		}
+		parent.Members = append(parent.Members, member)
 
-		s.WriteByte(' ')
-
-		if quoted {
-			s.WriteByte('\'')
-		}
-		s.WriteString(name)
-
-		if cTypeSuffix != "" {
-			s.WriteString(cTypeSuffix)
-		}
-		if quoted {
-			s.WriteByte('\'')
-		}
-
-		s.WriteString(";")
-
-		if comment != "" {
-			s.WriteString(fmt.Sprintf("	// %s", comment))
-		}
-
-		s.WriteString("\n")
+		// if quoted {
+		// 	s.WriteByte('\'')
+		// }
 	}
 
 	return nil
 }
 
-func (c *CConverter) FileExtension() string {
-	return "h"
-}
-
-func (c *CConverter) Convert(w *strings.Builder, asts []ast.Node) error {
+func (c *CConverter) InspectNodes(asts []ast.Node) error {
 	var err error
-	name := "MyInterface"
-
-	c.MappedTypes = make(map[string]string)
-
-	first := true
-
-	builder := new(strings.Builder)
-
-	// clean user includes for them
-	for i := range c.Comments.CIncludes {
-		c.Comments.CIncludes[i] = CleanCInclude(c.Comments.CIncludes[i])
-	}
+	var name string
 
 	for _, f := range asts {
 		ast.Inspect(f, func(n ast.Node) bool {
@@ -252,32 +242,41 @@ func (c *CConverter) Convert(w *strings.Builder, asts []ast.Node) error {
 			case *ast.Ident:
 				name = x.Name
 			case *ast.StructType:
-				if !first {
-					builder.WriteString("\n\n")
+				cStruct := CStruct{
+					Name: name,
 				}
 
-				builder.WriteString("typedef struct {\n")
-
-				err = c.CWriteFields(builder, x.Fields.List, 0)
+				err = c.InspectFields(x.Fields.List, 0, &cStruct)
 				if err != nil {
 					return false
 				}
 
-				builder.WriteString("} ")
+				c.Structs = append(c.Structs, cStruct)
 
 				newName := c.Prefix + name + c.Suffix
 				c.MappedTypes[name] = newName
-				builder.WriteString(newName)
 
-				builder.WriteString(";\n")
-
-				first = false
-
-				// TODO: allow multiple structs
 				return false
 			}
 			return true
 		})
+	}
+
+	return err
+}
+
+func (c *CConverter) Convert(w *strings.Builder, asts []ast.Node) error {
+	var err error
+	c.MappedTypes = make(map[string]string)
+
+	// clean user includes for them
+	for i := range c.Comments.CIncludes {
+		c.Comments.CIncludes[i] = CleanCInclude(c.Comments.CIncludes[i])
+	}
+
+	err = c.InspectNodes(asts)
+	if err != nil {
+		return err
 	}
 
 	w.WriteString("#pragma once\n\n")
@@ -291,7 +290,33 @@ func (c *CConverter) Convert(w *strings.Builder, asts []ast.Node) error {
 	}
 
 	w.WriteString("\n")
-	w.WriteString(builder.String())
+
+	for _, cStruct := range c.Structs {
+		w.WriteString("typedef struct {\n")
+
+		for _, member := range cStruct.Members {
+
+			renamed, ok := c.MappedTypes[member.Type]
+			if !ok {
+				renamed = member.Type
+			}
+
+			w.WriteString(fmt.Sprintf("%s%s ", CIndent, renamed))
+			if member.IsPointer {
+				w.WriteString("*")
+			}
+
+			w.WriteString(fmt.Sprintf("%s%s;", member.Name, member.TypeSuffix))
+
+			if member.Comment != "" {
+				w.WriteString(fmt.Sprintf("%s// %s", CIndent, member.Comment))
+			}
+
+			w.WriteString("\n")
+		}
+
+		w.WriteString(fmt.Sprintf("} %s%s%s;\n\n", c.Prefix, cStruct.Name, c.Suffix))
+	}
 
 	return err
 }

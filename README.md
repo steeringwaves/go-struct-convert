@@ -7,7 +7,7 @@
 
 - [x] Generate c header from go file
 - [x] Generate typescript from go file
-- [ ] Parse nested go structs
+- [x] Parse nested go structs
 - [ ] Parse multiple go files
 
 ### go -> c
