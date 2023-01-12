@@ -51,3 +51,6 @@ go-struct-convert typescript example/example.go --output dist/
 
 ```
 
+## installation
+
+see https://github.com/nakabonne/gosivy/blob/main/.github/workflows/release.yaml so we can do something similar
