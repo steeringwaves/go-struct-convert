@@ -158,13 +158,6 @@ func (inspecter *Inspecter) inspectTypes(t ast.Expr, depth int, parent *Struct) 
 		}
 		res.IsArray = true
 		return res, nil
-	// case *ast.StructType:
-	// 	// TODO this is wrong
-	// 	_, err := c.inspectTypes(t.Fields.List, depth+1, parent)
-	// 	if err != nil {
-	// 		return "", err
-	// 	}
-
 	case *ast.Ident:
 		structType.Value = inspecter.Converter.GetIdent(t.String())
 		return structType, nil
@@ -191,17 +184,6 @@ func (inspecter *Inspecter) inspectTypes(t ast.Expr, depth int, parent *Struct) 
 		}
 		res.MapVal = &mapKeyVal
 		return res, nil
-	// s.WriteString("{ [key: ")
-	// err := ts.TypescriptWriteType(s, t.Key, depth, false)
-	// if err != nil {
-	// 	return err
-	// }
-	// s.WriteString("]: ")
-	// err = ts.TypescriptWriteType(s, t.Value, depth, false)
-	// if err != nil {
-	// 	return err
-	// }
-	// s.WriteByte('}')
 	default:
 		return structType, fmt.Errorf("unhandled: %s, %T", t, t)
 	}
@@ -237,15 +219,15 @@ func (inspecter *Inspecter) inspectFields(fields []*ast.Field, depth int, parent
 
 			typeFromTag, typeFromTagExists = inspecter.Converter.GetTypeFromTags(tags)
 
-			jsonTag, err := tags.Get("json")
-			if err == nil {
-				name = jsonTag.Name
-				if name == "-" {
-					continue
-				}
+			// jsonTag, err := tags.Get("json")
+			// if err == nil {
+			// 	name = jsonTag.Name
+			// 	if name == "-" {
+			// 		continue
+			// 	}
 
-				// optional = jsonTag.HasOption("omitempty")
-			}
+			// 	// optional = jsonTag.HasOption("omitempty")
+			// }
 
 			// get validator tag
 			// validatorTag, err := tags.Get("validator")
@@ -258,7 +240,12 @@ func (inspecter *Inspecter) inspectFields(fields []*ast.Field, depth int, parent
 			name = fieldName
 		}
 
-		// quoted := !CValidCName(name)
+		if !inspecter.Converter.ValidName(name) {
+			// TODO can we be smart about remove bad characters?
+			fmt.Fprintf(os.Stderr, "WARNING! name is not valid %s\n", name)
+			continue
+		}
+
 		isPointer := false
 
 		switch t := f.Type.(type) {
@@ -273,7 +260,6 @@ func (inspecter *Inspecter) inspectFields(fields []*ast.Field, depth int, parent
 			Type: StructMemberType{
 				IsPointer: isPointer,
 			},
-			// TODO what is quoted??
 		}
 
 		if typeFromTagExists {
@@ -303,16 +289,12 @@ func (inspecter *Inspecter) inspectFields(fields []*ast.Field, depth int, parent
 					return err
 				}
 
-				// TODO what if it's another struct??????
 				member.Type = res
 			}
 		}
 
 		parent.Members = append(parent.Members, member)
 
-		// if quoted {
-		// 	s.WriteByte('\'')
-		// }
 	}
 
 	return nil
@@ -415,12 +397,6 @@ func (inspecter *Inspecter) ConvertFiles(inputs []string) (*strings.Builder, err
 		var f ast.Node
 		f, err = parser.ParseExprFrom(token.NewFileSet(), filename, s, parser.AllErrors|parser.ParseComments)
 		if err != nil {
-			// 		s = fmt.Sprintf(`package main
-
-			// func main() {
-			// 	%s
-			// }`, s)
-
 			f, err = parser.ParseFile(token.NewFileSet(), filename, s, parser.AllErrors|parser.ParseComments)
 			if err != nil {
 				return nil, err
